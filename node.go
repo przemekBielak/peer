@@ -2,6 +2,7 @@ package main
 
 import (
 	"github.com/przemekBielak/blockchain"
+	"github.com/davecgh/go-spew/spew" 
 	libp2p "github.com/libp2p/go-libp2p"
 	crypto "github.com/libp2p/go-libp2p-crypto" 
 	ma "github.com/multiformats/go-multiaddr"
@@ -14,6 +15,8 @@ import (
 	"flag"
 	"bufio"
 	"os"
+	"encoding/json"
+	"strings"
 )
 
 
@@ -30,6 +33,7 @@ func handleStream(s net.Stream) {
 
 	// stream 's' will stay open until you close it (or the other side closes it).
 }
+
 func readData(rw *bufio.ReadWriter) {
 	for {
 		str, _ := rw.ReadString('\n')
@@ -38,11 +42,19 @@ func readData(rw *bufio.ReadWriter) {
 			return
 		}
 		if str != "\n" {
-			// Green console colour: 	\x1b[32m
-			// Reset console colour: 	\x1b[0m
-			fmt.Printf("\x1b[32m%s\x1b[0m> ", str)
-		}
+			newBlockchain := make(blockchain.Blockchain, 0)
+			err := json.Unmarshal([]byte(str), &newBlockchain)
+			if err != nil {
+				fmt.Println("Parsing json failed")
+			}
 
+			blockchain.Verify(&myBlockchain, &newBlockchain)
+
+			for _, val := range myBlockchain {
+				spew.Dump(val)
+			}
+			fmt.Print("> ")
+		}
 	}
 }
 
@@ -50,14 +62,28 @@ func writeData(rw *bufio.ReadWriter) {
 	stdReader := bufio.NewReader(os.Stdin)
 
 	for {
-		fmt.Print("> ")
-		sendData, err := stdReader.ReadString('\n')
-
+		fmt.Printf("\x1b[32m> \x1b[0m")
+		readData, err := stdReader.ReadString('\n')
 		if err != nil {
 			panic(err)
 		}
 
-		rw.WriteString(fmt.Sprintf("%s\n", sendData))
+		// add read data to blockchain
+		readData = strings.Replace(readData, "\n", "", -1)
+		err = myBlockchain.Append(readData)
+		if err != nil {
+			fmt.Println(err)
+		}
+
+		// create JSON from blockchain struct
+		b, err := json.Marshal(myBlockchain)
+		if err != nil {
+			fmt.Println("error:", err)
+		}
+
+		blockchainJSONString := string(b)
+
+		rw.WriteString(fmt.Sprintf("%s\n", blockchainJSONString))
 		rw.Flush()
 	}
 
@@ -94,7 +120,7 @@ func createHost() {
 
 	// If destination address is not provided, act as a host
 	if *destAddrPtr == "" {
-		host.SetStreamHandler("/chat/1.0.0", handleStream)
+		host.SetStreamHandler("/blockchain/0.0.1", handleStream)
 
 		// Get the actual TCP port from listen multiaddr
 		// 0 - random available port
@@ -112,7 +138,7 @@ func createHost() {
 			panic("was not able to find actual local port")
 		}
 
-		fmt.Printf("Run './chat -d /ip4/127.0.0.1/tcp/%v/p2p/%s' on another console.\n", port, host.ID().Pretty())
+		fmt.Printf("Run 'go run node.go -d /ip4/127.0.0.1/tcp/%v/p2p/%s' on another console.\n", port, host.ID().Pretty())
 		fmt.Println("You can replace 127.0.0.1 with public IP as well.")
 		fmt.Printf("\nWaiting for incoming connection\n\n")
 
@@ -142,7 +168,7 @@ func createHost() {
 
 		host.Peerstore().AddAddrs(peerInfo.ID, peerInfo.Addrs, peerstore.PermanentAddrTTL)
 
-		s, err := host.NewStream(context.Background(), peerInfo.ID, "/chat/1.0.0")
+		s, err := host.NewStream(context.Background(), peerInfo.ID, "/blockchain/0.0.1")
 		if err != nil {
 			fmt.Println(err)
 		}
@@ -160,8 +186,6 @@ func main() {
 
 	// create genesis block 
 	myBlockchain = append(myBlockchain, blockchain.Block{0, "genesis", "genesis", "genesis", "genesis"})
-
-	fmt.Println(myBlockchain)
 
 	createHost()
 }
